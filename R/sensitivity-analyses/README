@@ -1,0 +1,15 @@
+README - Sensitivity Analyses
+
+files in this subdirectory ( "R/sensitivity-analyses/" ):
+
+"01-remove-underreporting-states.R" -- this analysis takes the CDC data and removes states with CDC mortality rates that are > 2x smaller than the mortality rates seen in the JHU dataset (at the county level). The inla is used to fit the model with the CDC death counts as the response variable. We also perform a sensitivity analyses removing counties from NE, UT, and FL from the JHU dataset given that there was some indication of the data being a function of the state as seen on the chloropleths from the descriptive analysis.
+
+"01b-remove-underreporting-states-alt.R" -- this analysis is the same as above but instead of implementing covariate selection with the Watanabe–Akaike information criterion (WAIC), it extracts the predictors from the main analysis for the final model in each of the national stratified analyses and uses those predictors in the model specification. Thus, covariate selection is turned off. NOTE: we used the first file, "01-remove-underreporting-states.R", for this sensitivity analysis and wrote the code for this alternate file in case we need it in the future. Be mindful that running the code in this file overwrites all the figures and tables that are generated in "01-remove-underreporting-states.R".
+
+"02-selection-with-waic.R" -- this analysis is the same as the primary analysis (implements a stepwise covariate selection algorithm) but uses the Watanabe–Akaike information criterion (WAIC) instead of the Deviance Information Criterion (DIC). We also use a threshold difference of "5" for the WAIC for decisions on keeping/removing variables.
+
+"03-choice-of-priors.R" -- this analysis fits the ICAR model in INLA (using only the JHU data) but with different prior distributions for the precisions of the random effects in the model. We use a specification of the penalized complexity prior (PC prior) and 4 specifications of loggamma distribution priors.  
+
+"04-no-covariate-selection.R" -- this analysis is the same as the primary analysis but with no selection algorithm for the covariates we include in the model. This is done to gauge whether there is any residual confounding we may be missing out on by excluding some of the variables through the model selection procedure.
+
+"run-this.R" -- code for sourcing all of the above files at once. **NOTE: There is no need to run any of the above files individually. Code can be changed, but ultimately, the code can be run from this single file. All of the above R files are written so that the results files are automatically deposited in the "04-Tables-Figures/06-sensitivity-analyses/" subdirectory.
