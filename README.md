@@ -15,8 +15,3 @@ Public repository of R code and data for reproducing the analysis in the compani
 **/R**: Contains all `.R` files with code to reproduce all data-wrangling steps, analyses, tables, and figures.
 \
 \
-\
-\
-**Contact Me**:
-
-Email: [mainovieytesca\@nih.gov](mailto:mainovieytesca@nih.gov)
