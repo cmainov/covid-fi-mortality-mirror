@@ -33,6 +33,7 @@ library( viridis ) # color palletes for ggplot
 library( reshape2 ) # for melting data (needed in `car_inla_analysis` fct)
 library( scales ) # for number formatting in ggplot (i.e., numbers past the decimal mark)
 library( cowplot ) # for figure labels
+library( ggspatial )
 
 # helper functions
 source( "R/utils.R" )
@@ -67,9 +68,26 @@ d.poly <- t %>%
 ## note: SIR and expected deaths counts are dataset-specific, which is why we compute them
 ## for each dataset we feed through `car_inla_analysis`
 
+
+## Data with removal of UT, NE, and FL in JHU data ##
+
+# merge geometries to our dataset
+d.poly.jhu <- t %>%
+  mutate( state.code = str_extract( GEOID, "^.{2}") ) %>%
+  dplyr::select( -state.code ) %>%
+  dplyr::rename( fips = GEOID ) %>%
+  left_join( ., d, by = c( "fips" ) ) %>%
+  filter( fips %in% d$fips ) %>%
+  filter( !state.code %in% c( "49", "31", "12" ) ) %>% # remove potentially underreporting states (NE, FL, and UT)
+  mutate( E_d.j = ceiling( mean( .$amr, na.rm = TRUE )*pop ), # expected death count for offset term (using JHU data)
+          exp.cases.jhu = ceiling( mean( .$inc.prop.jhu, na.rm = TRUE )*pop /100000 ), # expected case count for SIR computation (using JHU data)
+          sir.jhu = cases.jhu / exp.cases.jhu, # SIR computation, county-level (JHU data)
+          exp.cases.jhu.state = ceiling( mean( .$inc.prop.jhu.state, na.rm = TRUE )*state.pop /100000 ), # expected case count for state-level SIR computation (using JHU data)
+          sir.jhu.state = cases.jhu.state / exp.cases.jhu.state ) # SIR computation, state-level (JHU data)
+## note: SIR and expected deaths counts are dataset-specific, which is why we compute them
+## for each dataset we feed through `car_inla_analysis`
+
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
-
-
 
 
 ### (2.0) Formula Specification ###
@@ -77,49 +95,13 @@ d.poly <- t %>%
 
 ## (2.1) Models with Full Set of Covariates ##
 
-# jhu data
+# model specs
 
-# specify formula (we specify the same formula with the same predictors that were selected for in the main analysis)
-this.file.jhu.1 <- "/Users/mainovieytesca/Documents/GitHub/COVID-FI-Mortality/04-Tables-Figures/01-main-analysis/jhu-results/model-selection-log.txt" # this obtains the file with the list of predictors that were included in the final model
-
-# clunky way of reading in the predictors .txt file and preparing it for creating the formula
-f.1.preds.jhu <- readLines( this.file.jhu.1 ) %>%
-  noquote( . ) %>%
-  str_extract(., "(?<=R:\\s).*") %>% noquote( . ) %>%
-  str_replace(., '\\"', '') %>%
-  .[ !is.na(.) ]
-
-f.jhu.a <- as.formula( paste0( "deaths.jhu ~ I(fi.perc.20/4) +", paste0( f.1.preds.jhu, collapse = '+' ),
-                               "+ median.age + sir.jhu + health.index", # basic model variables
-                               "+ sir.jhu.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +", # basic + state model variables
-                               "+ f( re.s, model = 'besag', graph = g, scale.model = T ) + f( state, model = 'iid') + f( fips, model = 'iid' )" ) ) # random effects
-
-## ---o--- ##
-
-
-## (2.2) Models with Random Effects and Offset Terms Only ("Null/baseline Model") ##
-
-f.jhu.model.null <- deaths.jhu.adj ~ f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-## ---o--- ##
-
-## (2.3) Models with Random Effects, Offset Terms, and Fixed Effects for Health Index and Median Age ("Basic Model") ##
-f.jhu.model.2 <- deaths.jhu.adj ~ health.index + median.age + sir.jhu + f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-## (2.4) Models with Random Effects, Offset Terms, and Fixed Effects for Health Index and Median Age
-## and State-Level Variables ("Basic + State Model") ##
-f.jhu.model.3 <- deaths.jhu.adj ~ health.index + median.age + sir.jhu +
-  sir.jhu.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
+source( "R/model-specs.R" )
 
 ## ---o--- ##
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
-
-
 
 
 ### (3.0) Set the Parameters of the Priors to Loop On ###
@@ -144,25 +126,71 @@ priors.list <- list(
 ## (4.1) Call INLA ##
 
 # states to remove from maps
-
 states.fips.out <- unique( c( "69", "60", "66", "78", "15", "02", "72" ) )
 
+states.fips.out.jhu.sens <- unique( c( d[ which( d$state %in% c( "UT", "NE", "FL")), "state.code" ],
+                                       "69", "60", "66", "78", "15", "02", "72" ) )
 # initialize list to store results
 res.priors.jhu <- list()
 
 # loop through each specification of the priors 
 for( i in seq_along( priors.list ) ){
   
-  res.priors.jhu[[i]] <- car_inla_analysis( d.jhu = d.poly, d.cdc = d.poly,
-                                formula.jhu = f.jhu.a, 
-                                which.model = "jhu", E = "E_d.j", car.prior = priors.list[[i]],
-                                ur.prior = priors.list[[i]],
-                                term = "fi", null.model.formula = f.jhu.model.null,
-                                model.2.formula = f.jhu.model.2,
-                                model.3.formula = f.jhu.model.3,
-                                selection.criterion = NULL,
-                                state.codes.omit = states.fips.out )
+  res.priors.jhu[[i]] <- car_inla_analysis( d.jhu = d.poly, d.cdc = NULL,
+                                            formula.jhu = f.jhu.model.5,
+                                            car.prior = priors.list[[i]],
+                                            ur.prior = priors.list[[i]],
+                                            which.model = "jhu", E = "E_d.j",
+                                            term = "fi", null.model.formula = f.jhu.model.null,
+                                            model.2.formula = f.jhu.model.2, 
+                                            model.3.formula = f.jhu.model.3,
+                                            model.4.formula = f.jhu.model.4,
+                                            state.codes.omit = states.fips.out )
+  
+}
 
+
+## Add Poverty ##
+
+# initialize list to store results
+res.priors.jhu.pov <- list()
+
+# loop through each specification of the priors 
+for( i in seq_along( priors.list ) ){
+  
+  res.priors.jhu.pov[[i]] <- car_inla_analysis( d.jhu = d.poly, d.cdc = NULL,
+                                            formula.jhu = f.jhu.model.5.pov,
+                                            car.prior = priors.list[[i]],
+                                            ur.prior = priors.list[[i]],
+                                            which.model = "jhu", E = "E_d.j",
+                                            term = "fi", null.model.formula = f.jhu.model.null,
+                                            model.2.formula = f.jhu.model.2, 
+                                            model.3.formula = f.jhu.model.3,
+                                            model.4.formula = f.jhu.model.4,
+                                            state.codes.omit = states.fips.out )
+  
+}
+
+
+## Remove UT, JHU, and FL ##
+
+# initialize list to store results
+res.priors.jhu.pov.sens <- list()
+
+# loop through each specification of the priors 
+for( i in seq_along( priors.list ) ){
+  
+  res.priors.jhu.pov.sens[[i]] <- car_inla_analysis( d.jhu = d.poly.jhu, d.cdc = NULL,
+                                                formula.jhu = f.jhu.model.5.pov,
+                                                car.prior = priors.list[[i]],
+                                                ur.prior = priors.list[[i]],
+                                                which.model = "jhu", E = "E_d.j",
+                                                term = "fi", null.model.formula = f.jhu.model.null,
+                                                model.2.formula = f.jhu.model.2, 
+                                                model.3.formula = f.jhu.model.3,
+                                                model.4.formula = f.jhu.model.4,
+                                                state.codes.omit = states.fips.out.jhu.sens )
+  
 }
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -190,11 +218,55 @@ ggarrange(  res.priors.jhu[[1]]$rand.eff.var.plot +
            common.legend = TRUE, legend = "bottom" )
 
 # dir.create( "04-Tables-Figures/06-sensitivity-analyses/04-choice-of-priors/" )
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/04-choice-of-priors/jhu-results" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results" )
 
-ggsave( "04-Tables-Figures/06-sensitivity-analyses/04-choice-of-priors/jhu-results/priors-fractional-spatial-variance-plot.png",
+ggsave( "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results/priors-fractional-spatial-variance-plot.png",
         width = 6, height = 8 )
 
+
+# save spatial fractional variance plots arranged
+ggarrange(  res.priors.jhu.pov[[1]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(1, 0.005)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            res.priors.jhu.pov[[2]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(0.5, 0.01)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            res.priors.jhu.pov[[3]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(0.25, 1)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            res.priors.jhu.pov[[4]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(0.5, 1)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            nrow = 3, ncol = 2,
+            common.legend = TRUE, legend = "bottom" )
+
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/04-choice-of-priors/" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results" )
+
+ggsave( "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results/add-poverty-priors-fractional-spatial-variance-plot.png",
+        width = 6, height = 8 )
+
+# save spatial fractional variance plots arranged
+ggarrange(  res.priors.jhu.pov.sens[[1]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(1, 0.005)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            res.priors.jhu.pov.sens[[2]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(0.5, 0.01)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            res.priors.jhu.pov.sens[[3]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(0.25, 1)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            res.priors.jhu.pov.sens[[4]]$rand.eff.var.plot +
+              ggtitle( TeX( "log-$\\gamma(0.5, 1)$" ) ) +
+              theme( plot.title = element_text( color = "grey44", hjust = 1 ) ),
+            nrow = 3, ncol = 2,
+            common.legend = TRUE, legend = "bottom" )
+
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/04-choice-of-priors/" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results" )
+
+ggsave( "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results/add-poverty-priors-fractional-spatial-variance-plot-remove-ut-fl-ne.txt.png",
+        width = 6, height = 8 )
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
@@ -212,9 +284,31 @@ bind_rows( res.priors.jhu[[1]]$fixed.term,
            res.priors.jhu[[3]]$fixed.term,
            res.priors.jhu[[4]]$fixed.term)
 ) %>%
-  write.table( ., "04-Tables-Figures/06-sensitivity-analyses/04-choice-of-priors/jhu-results/priors-fi-fixed-effects-estimates.txt",
+  write.table( ., "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results/priors-fi-fixed-effects-estimates.txt",
                sep = "," )
            
-           
+     
+# fixed effects
+bind_cols( data.frame( prior.choice = c( "log-gamma(1, 0.005)", "log-gamma(0.5, 0.01)",
+                                         "log-gamma(0.25, 1)","log-gamma(0.5, 1)") ),
+           bind_rows( res.priors.jhu.pov[[1]]$fixed.term,
+                      res.priors.jhu.pov[[2]]$fixed.term,
+                      res.priors.jhu.pov[[3]]$fixed.term,
+                      res.priors.jhu.pov[[4]]$fixed.term)
+) %>%
+  write.table( ., "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results/add-poverty-priors-fi-fixed-effects-estimates.txt",
+               sep = "," )      
+
+
+# fixed effects
+bind_cols( data.frame( prior.choice = c( "log-gamma(1, 0.005)", "log-gamma(0.5, 0.01)",
+                                         "log-gamma(0.25, 1)","log-gamma(0.5, 1)") ),
+           bind_rows( res.priors.jhu.pov.sens[[1]]$fixed.term,
+                      res.priors.jhu.pov.sens[[2]]$fixed.term,
+                      res.priors.jhu.pov.sens[[3]]$fixed.term,
+                      res.priors.jhu.pov.sens[[4]]$fixed.term)
+) %>%
+  write.table( ., "04-Tables-Figures/06-sensitivity-analyses/03-choice-of-priors/jhu-results/add-poverty-priors-fi-fixed-effects-estimates-remove-ut-fl-ne.txt",
+               sep = "," )    
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
 

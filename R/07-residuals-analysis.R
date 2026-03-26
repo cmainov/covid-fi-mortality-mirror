@@ -94,15 +94,19 @@ g <<- inla.read.graph( filename = paste( td, "inla-mat.adj", sep="/" ) )
 ## (3.1) Formula ##
 
 
-# specify formula (we specify the same formula with the same predictors that were selected for in the main analysis)
-this.file.jhu.1 <- "/Users/mainovieytesca/Documents/GitHub/COVID-FI-Mortality/04-Tables-Figures/01-main-analysis/jhu-results/model-selection-log.txt" # this obtains the file with the list of predictors that were included in the final model
+# model specs
+source( "R/model-specs.R" )
 
 # clunky way of reading in the predictors .txt file and preparing it for creating the formula
-f.1.preds.jhu <- readLines( this.file.jhu.1 ) %>%
-  noquote( . ) %>%
-  str_extract(., "(?<=R:\\s).*") %>% noquote( . ) %>%
+f.1.preds.jhu <- f.jhu.model.5 %>%
+  paste0( . ) %>%
+  str_remove_all(., "(?<=f\\().*") %>% noquote( . ) %>%
   str_replace(., '\\"', '') %>%
-  .[ !is.na(.) ]
+  .[ !is.na(.) ] %>% 
+  str_split( ., "\\s\\+\\s" ) %>% 
+  .[3] %>% 
+  unlist() %>% 
+  .[ !str_detect( ., "f\\(") ]
 
 f.jhu.1 <- as.formula( paste0( "deaths.jhu.adj ~ I(fi.perc.20/4) +", paste0( f.1.preds.jhu, collapse = '+' ),
                                "+ median.age + sir.jhu + health.index", # basic model variables

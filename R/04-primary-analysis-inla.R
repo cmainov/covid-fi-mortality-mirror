@@ -5,8 +5,7 @@
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
 # 
 # In this script, we fit the conditional autoregressive models in INLA using two functions written for this purpose.
-# The `car_inla_analysis` function carries out the entire analysis. Nested within `car_inla_analysis`
-# is the `stepwise_z` function which implements a stepwise model selection approach for covariate selection.
+# The `car_inla_analysis` function carries out the entire analysis.
 # The models we fit include two random effects: a spatially structured random effect at the county level and
 # an unstructured random effect at the state level. NOTE: the `car_inla_analysis` fct stipulates the default log-
 # gamma distributions for the hyperparameters of the models we fit (we later carry out a sensitivity analysis)
@@ -43,11 +42,10 @@ library( viridis ) # color palletes for ggplot
 library( reshape2 ) # for melting data (needed in `car_inla_analysis` fct)
 library( scales ) # for number formatting in ggplot (i.e., numbers past the decimal mark)
 library( cowplot ) # for figure labels
+library( ggspatial )
 
 # helper functions
 source( "R/utils.R" )
-
-
 
 ### (1.0) Data Import and Preparation ###
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -88,78 +86,13 @@ d.poly <- t %>%
 
 ## (2.1) Models with Full Set of Covariates ##
 
-# NOTE: 2/20/2024, due to reviewer request, we are removing covariates used in the 
-# computation of the MTMG FI prevalence to address potential for collinearity
-# SEE doi:10.1093/aepp/ppu018
-
-# jhu data
-f.jhu <- deaths.jhu.adj ~ I(fi.perc.20/4) + pct.emp.trans + no.vehic + 
-  disability + no.health.insur + perc.female + perc.nh.white +
-  perc.native + pop.density + ed.1less.than.hspct + 
-  ed.5college.plus.pct + pct.emp.trade + median.age + perc.asian +
-  perc.vaccinated + gini.index + avg.hhsize + elec.2020.margin +
-  ratio.pop.edp + health.index + sir.jhu + urb.cat.code + 
-  sir.jhu.state + health.index.state + elec.2020.margin.state +
-  perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid") + f( fips, model = "iid" )
-
-# cdc data
-f.cdc <- deaths.cdc ~ I(fi.perc.20/4) + pct.emp.trans + no.vehic + 
-  disability + no.health.insur + perc.female + perc.nh.white +
-  perc.native + pop.density + ed.1less.than.hspct + 
-  ed.5college.plus.pct + pct.emp.trade + median.age + perc.asian +
-  perc.vaccinated + gini.index + avg.hhsize + elec.2020.margin +
-  ratio.pop.edp + health.index + sir.cdc + urb.cat.code + 
-  sir.cdc.state + health.index.state + elec.2020.margin.state +
-  perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid") + f( fips, model = "iid" )
-
-
-## ---o--- ##
-
-
-## (2.2) Models with Random Effects and Offset Terms Only ("Null/baseline Model") ##
-
-# jhu
-f.jhu.model.null <- deaths.jhu.adj ~ f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-#cdc
-f.cdc.model.null <- deaths.cdc ~ f( re.s, model = "besag", graph = g.cdc, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-## ---o--- ##
-
-
-## (2.3) Models with Random Effects, Offset Terms, and Fixed Effects for Health Index and Median Age ("Basic Model") ##
-f.jhu.model.2 <- deaths.jhu.adj ~ health.index + median.age + sir.jhu + f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-f.cdc.model.2 <- deaths.cdc ~ health.index + median.age + sir.cdc + f( re.s, model = "besag", graph = g.cdc, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-
-## (2.4) Models with Random Effects, Offset Terms, and Fixed Effects for Health Index and Median Age
-## and State-Level Variables ("Basic + State Model") ##
-
-f.jhu.model.3 <- deaths.jhu.adj ~ health.index + median.age + sir.jhu +
-  sir.jhu.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-f.cdc.model.3 <- deaths.cdc ~ health.index + median.age + sir.cdc +
-  sir.cdc.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g.cdc, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
+# model specs
+source( "R/model-specs.R" )
 
 ## ---o--- ##
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
-
-
 
 
 ### (3.0) INLA Analysis: National (Nearly All U.S. Counties) ###
@@ -172,14 +105,13 @@ f.cdc.model.3 <- deaths.cdc ~ health.index + median.age + sir.cdc +
 states.fips.out <- unique( c( "69", "60", "66", "78", "15", "02", "72" ) )
 
 # jhu analysis
-res.jhu.1 <- car_inla_analysis( d.jhu = d.poly, d.cdc = d.poly,
-                                formula.jhu = f.jhu, formula.cdc = f.cdc,
+res.jhu.1 <- car_inla_analysis( d.jhu = d.poly, d.cdc = NULL,
+                                formula.jhu = f.jhu.model.5,
                                 which.model = "jhu", E = "E_d.j",
                                 term = "fi", null.model.formula = f.jhu.model.null,
                                 model.2.formula = f.jhu.model.2, 
                                 model.3.formula = f.jhu.model.3,
-                                selection.criterion = "waic",
-                                criterion.threshold = 5, 
+                                model.4.formula = f.jhu.model.4,
                                 state.codes.omit = states.fips.out )
 
 # plot state-level residuals to identify potential outliers
@@ -197,14 +129,13 @@ ggsave( "/Users/mainovieytesca/Documents/GitHub/COVID-FI-Mortality/04-Tables-Fig
 
 
 # cdc analysis
-res.cdc.1 <- car_inla_analysis( d.jhu = d.poly, d.cdc = d.poly,
-                                formula.jhu = f.jhu, formula.cdc = f.cdc,
-                                which.model = "cdc",  E = "E_d.c",
+res.cdc.1 <- car_inla_analysis( d.cdc = d.poly, 
+                                formula.cdc = f.cdc.model.5,
+                                which.model = "cdc", E = "E_d.c",
                                 term = "fi", null.model.formula = f.cdc.model.null,
                                 model.2.formula = f.cdc.model.2, 
                                 model.3.formula = f.cdc.model.3,
-                                selection.criterion = "waic",
-                                criterion.threshold = 5,
+                                model.4.formula = f.cdc.model.4,
                                 state.codes.omit = states.fips.out )
 
 ## ---o--- ##
@@ -233,7 +164,7 @@ inla_results_save( res.cdc.1, path = paste0( "04-Tables-Figures/01-main-analysis
 
 ## (4.1) Subset Data Based on Census Region ##
 
-d.ne <- d%>%
+d.ne <- d %>%
   filter( state %in% c( "ME", "NH", "VT", "MA", "RI", "CT", "NY", "NJ", "PA" ) )
 
 states.out.ne <- unlist( c( unique( d[ d$state %notin%  c( "ME", "NH", "VT", "MA", "RI", "CT", "NY", "NJ", "PA" ), "state.code" ] ),
@@ -266,25 +197,23 @@ states.out.ne <- unlist( c( unique( d[ d$state %notin%  c( "ME", "NH", "VT", "MA
 ## (4.2) Call INLA ##
 
 # jhu
-res.jhu.ne <- car_inla_analysis( d.jhu = d.poly.ne, d.cdc = d.poly.ne,
-                                 formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                 term = "fi", which.model = "jhu", E = "E_d.j", 
-                                 null.model.formula = f.jhu.model.null,
+res.jhu.ne <- car_inla_analysis( d.jhu = d.poly.ne, d.cdc = NULL,
+                                 formula.jhu = f.jhu.model.5,
+                                 which.model = "jhu", E = "E_d.j",
+                                 term = "fi", null.model.formula = f.jhu.model.null,
                                  model.2.formula = f.jhu.model.2, 
                                  model.3.formula = f.jhu.model.3,
-                                 criterion.threshold = 5, 
-                                 selection.criterion = "waic",
-                                 state.codes.omit = states.out.ne )
+                                 model.4.formula = f.jhu.model.4,
+                                 state.codes.omit = states.out.ne  )
 
 # cdc
-res.cdc.ne <- car_inla_analysis( d.jhu = d.poly.ne, d.cdc = d.poly.ne,
-                                 formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                 term = "fi", which.model = "cdc", E = "E_d.c", 
-                                 null.model.formula = f.cdc.model.null,
+res.cdc.ne <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.ne,
+                                 formula.cdc = f.cdc.model.5,
+                                 which.model = "cdc", E = "E_d.c",
+                                 term = "fi", null.model.formula = f.cdc.model.null,
                                  model.2.formula = f.cdc.model.2, 
                                  model.3.formula = f.cdc.model.3,
-                                 selection.criterion = "waic",
-                                 criterion.threshold = 5,
+                                 model.4.formula = f.cdc.model.4,
                                  state.codes.omit = states.out.ne )
 
 ## ---o--- ##
@@ -347,24 +276,22 @@ states.out.so <- unlist( c( unique( d[ d$state %notin%  c( "MD", "DE", "DC", "WV
 ## (5.2) Call INLA ##
 
 # jhu
-res.jhu.so <- car_inla_analysis( d.jhu = d.poly.so, d.cdc = d.poly.so,
-                                 formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                 term = "fi", which.model = "jhu", E = "E_d.j", 
-                                 null.model.formula = f.jhu.model.null,
+res.jhu.so <- car_inla_analysis( d.jhu = d.poly.so, d.cdc = NULL,
+                                 formula.jhu = f.jhu.model.5,
+                                 which.model = "jhu", E = "E_d.j",
+                                 term = "fi", null.model.formula = f.jhu.model.null,
                                  model.2.formula = f.jhu.model.2, 
                                  model.3.formula = f.jhu.model.3,
-                                 selection.criterion = "waic",
-                                 criterion.threshold = 5,
-                                 state.codes.omit = states.out.so )
+                                 model.4.formula = f.jhu.model.4,
+                                 state.codes.omit = states.out.so  )
 # cdc
-res.cdc.so <- car_inla_analysis( d.jhu = d.poly.so, d.cdc = d.poly.so,
-                                 formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                 term = "fi", which.model = "cdc", E = "E_d.c", 
-                                 null.model.formula = f.cdc.model.null,
+res.cdc.so <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.so,
+                                 formula.cdc = f.cdc.model.5,
+                                 which.model = "cdc", E = "E_d.c",
+                                 term = "fi", null.model.formula = f.cdc.model.null,
                                  model.2.formula = f.cdc.model.2, 
                                  model.3.formula = f.cdc.model.3,
-                                 selection.criterion = "waic",
-                                 criterion.threshold = 5,
+                                 model.4.formula = f.cdc.model.4,
                                  state.codes.omit = states.out.so )
 
 ## ---o--- ##
@@ -427,23 +354,21 @@ states.out.mw <- unlist( c( unique( d[ d$state %notin%  c( "OH", "IN", "MI", "IL
 
 # jhu
 res.jhu.mw <- car_inla_analysis( d.jhu = d.poly.mw, d.cdc = d.poly.mw,
-                                 formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                 term = "fi", which.model = "jhu", E = "E_d.j", 
-                                 null.model.formula = f.jhu.model.null,
+                                 formula.jhu = f.jhu.model.5,
+                                 which.model = "jhu", E = "E_d.j",
+                                 term = "fi", null.model.formula = f.jhu.model.null,
                                  model.2.formula = f.jhu.model.2, 
                                  model.3.formula = f.jhu.model.3,
-                                 selection.criterion = "waic",
-                                 criterion.threshold = 5,
+                                 model.4.formula = f.jhu.model.4,
                                  state.codes.omit = states.out.mw )
 
-res.cdc.mw <- car_inla_analysis( d.jhu = d.poly.mw, d.cdc = d.poly.mw,
-                                 formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                 term = "fi", which.model = "cdc", E = "E_d.c", 
-                                 null.model.formula = f.cdc.model.null,
+res.cdc.mw <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.mw,
+                                 formula.cdc = f.cdc.model.5,
+                                 which.model = "cdc", E = "E_d.c",
+                                 term = "fi", null.model.formula = f.cdc.model.null,
                                  model.2.formula = f.cdc.model.2, 
                                  model.3.formula = f.cdc.model.3,
-                                 selection.criterion = "waic",
-                                 criterion.threshold = 5,
+                                 model.4.formula = f.cdc.model.4,
                                  state.codes.omit = states.out.mw )
 
 ## ---o--- ##
@@ -507,23 +432,21 @@ states.out.w <- unlist( c( unique( d[ d$state %notin%  c( "NM", "CO", "WY", "MT"
 
 # jhu
 res.jhu.w <- car_inla_analysis( d.jhu = d.poly.w, d.cdc = d.poly.w,
-                                formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                term = "fi", which.model = "jhu", E = "E_d.j", 
-                                null.model.formula = f.jhu.model.null,
+                                formula.jhu = f.jhu.model.5,
+                                which.model = "jhu", E = "E_d.j",
+                                term = "fi", null.model.formula = f.jhu.model.null,
                                 model.2.formula = f.jhu.model.2, 
                                 model.3.formula = f.jhu.model.3,
-                                selection.criterion = "waic",
-                                criterion.threshold = 5,
+                                model.4.formula = f.jhu.model.4,
                                 state.codes.omit = states.out.w )
 # cdc
-res.cdc.w <- car_inla_analysis( d.jhu = d.poly.w, d.cdc = d.poly.w,
-                                formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                term = "fi", which.model = "cdc", E = "E_d.c", 
-                                null.model.formula = f.cdc.model.null,
+res.cdc.w <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.w,
+                                formula.cdc = f.cdc.model.5,
+                                which.model = "cdc", E = "E_d.c",
+                                term = "fi", null.model.formula = f.cdc.model.null,
                                 model.2.formula = f.cdc.model.2, 
                                 model.3.formula = f.cdc.model.3,
-                                selection.criterion = "waic",
-                                criterion.threshold = 5,
+                                model.4.formula = f.cdc.model.4,
                                 state.codes.omit = states.out.w )
 
 ## ---o--- ##
@@ -574,7 +497,7 @@ region.char <- c("Census Region: Northeast", "Census Region: South",
                              x.label = unname( TeX( "Standardized Mortality Ratio (SMR)" ) ),
                              title = "Data Source: Johns Hopkins",
                              x.names = region.char,
-                             x.axis.limits = 1.22,
+                             x.axis.limits = 1.5,
                              limits.direction = "right") +
     theme( plot.margin=unit(c( 0.1,0.3,0.5,0.1), "cm" ) ) + # unit(c(top, right, bottom, left), units)
     theme( plot.title = element_text( size = 15.2, color = "grey44", hjust = 1 ) ) ) # color title text and right-align it

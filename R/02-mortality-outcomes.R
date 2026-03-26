@@ -518,7 +518,7 @@ d.9[ which( d.9$fips %notin% step.1$fips ), c( "fips", "state", "county" ) ]
 
 ## (7.2) Exclude Counties with Incomplete Covariate Data ##
 
-these.covs <- c( "pop", "pop.density", "fi.perc.20", "mort.rate.jhu", "age.adj.mort.rate", "median.age","perc.female", 
+these.covs <- c( "pop", "pop.density", "unemp.rate", "fi.perc.20", "mort.rate.jhu", "age.adj.mort.rate", "median.age","perc.female", 
                     "perc.native","perc.hisp","perc.black","perc.asian", "urb.cat.code", "no.health.insur", "disability",
                     "perc.nh.white", "perc.fb", "pct.emp.trade","pct.emp.trans","ed.1less.than.hspct","no.vehic",
                     "ed.5college.plus.pct","poverty.rate","cases.jhu", "avg.hhsize", "gini.index", "elec.2020.margin", 

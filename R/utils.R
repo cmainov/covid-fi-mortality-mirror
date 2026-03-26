@@ -659,7 +659,7 @@ plot_rr <- function( df, model, legend.scale = 0.3, share.legend, plot.this,
     theme_minimal( ) +
     theme( 
       legend.key.size = unit( legend.scale, 'cm' ),
-      plot.background = element_rect(color = "white")) +
+      plot.background = element_rect( color = "transparent" ) ) +
     guides( fill = guide_colorbar( title = "Rel. Risk",
                                    nbin = 10,
                                    ticks.colour = NA,
@@ -700,7 +700,7 @@ plot_rr <- function( df, model, legend.scale = 0.3, share.legend, plot.this,
     ggtitle( TeX( "$\\psi$" ) ) +
     theme( legend.title = element_blank(),
            legend.key.size = unit( legend.scale, 'cm' ),
-           plot.background = element_rect(color = "white")) +
+           plot.background = element_rect( color = "transparent" ) ) +
     guides( fill = guide_colorbar( ticks.colour = NA,
                                    frame.colour =  "black",
                                    barwidth = 10,
@@ -1036,7 +1036,7 @@ inla_var_explained <- function( model.fit ){
 # which.model = one of "jhu" or "cdc". it is the model ( cdc or jhu ) you choose to fit (they must be fit separately.)
 # car.prior =  spatially structured random effect precision prior specification. should be in list format (e.g., list(prec = list(prior = "loggamma", param = c(1, 0.0005)),initial = 4, fixed = F)). default is NULL which specified the former prior for the log precision. for the vector in the `param` argument, the first number is the shape parameter and the second is the rate parameter
 # ur.prior =  unstructured random effect precision prior specification. should in be list format (e.g., list(prec = list(prior = "gaussian", param = c(0, 0.002))) where first number in the vector is the mean and second is the precision.
-# formula.jhu = default is NULL for jhu model. if an alternative formula is desired, it can be put here. (see code below for default covariates). default model is the convolution model.
+# formula.jhu = default is NULL for jhu model ("final model"). if an alternative formula is desired, it can be put here. (see code below for default covariates). default model is the convolution model.
 # formula.cdc = default is NULL for cdc model. if an alternative formula is desired, it can be put here. (see code below for default covariates). default model is the convolution model.
 #   ***IMPORTANT***: DO NOT specify the `hyper` option in the formula for any random effects. instead, use the car.prior and ur.prior arguments to this function to specify priors for the random effects. otherwise, the function will break.
 
@@ -1044,21 +1044,23 @@ inla_var_explained <- function( model.fit ){
 # term = a character string of the variable name to return the exponentiated fixed effect estimate and 95% credible interval for
 # null.model.formula = an object of class `formula` that specifies the formula for the null model. necessary for creating the plot of explained geographic heterogeneity. default is NULL (i.e., no plot is returned but the percentage of explained variance by the structural and unstructured random effects is returned)
 # model.2.formula = an object of class `formula` that specifies the formula for the "basic" model. necessary for creating the plot of explained geographic heterogeneity. default is NULL (i.e., no plot is returned but the percentage of explained variance by the structural and unstructured random effects is returned)
+# model.3.formula = an object of class `formula` that specifies the formula for the "basic+state" model. necessary for creating the plot of explained geographic heterogeneity. default is NULL (i.e., no plot is returned but the percentage of explained variance by the structural and unstructured random effects is returned)
+# model.4.formula = an object of class `formula` that specifies the formula for the "demographic" model. necessary for creating the plot of explained geographic heterogeneity. default is NULL (i.e., no plot is returned but the percentage of explained variance by the structural and unstructured random effects is returned)
+
 # x.legend.pos = controls position of missing data legend along x axis. defaults to 0.73 
 # na.text = a character string. text for denoting the missing or omitted data for the missing data legend. defaults to "Incomplete Data",
 
-# dependencies: inla, ggplot2, ggpattern, ggpubr, dplyr, reshape2, viridis, cowplot
+# dependencies: inla, ggplot2, ggpattern, ggpubr, dplyr, reshape2, viridis, cowplot, ggspatial
 
-car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
+car_inla_analysis <- function( d.jhu = NULL, d.cdc = NULL , which.model, car.prior = NULL,
                                ur.prior = NULL,
                                formula.jhu = NULL, 
                                formula.cdc = NULL,
-                               selection.criterion = NULL,
-                               criterion.threshold = NULL,
                                E = NULL,
                                null.model.formula = NULL,
                                model.2.formula = NULL,
                                model.3.formula = NULL,
+                               model.4.formula = NULL,
                                term,
                                state.codes.omit,
                                na.text = "Incomplete Data",
@@ -1096,6 +1098,9 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
     
     # create graph object ( I don't like using super assignment operators within function environments but there is no other way to get the g vector to work)
     g <<- inla.read.graph( filename = paste( td, "inla-mat.adj", sep="/" ) )
+    
+    # create indices in data for the spatial random effects
+    d.jhu$re.s <- 1:nrow( d.jhu )
   }
   
   
@@ -1111,11 +1116,9 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
     # create graph object ( I don't like using super assignment operators within function environments but there is no other way to get the g vector to work)
     g.cdc <<- inla.read.graph( filename = paste( td, "inla-mat-cdc.adj", sep="/" ) )
     
+    d.cdc$re.s <- 1:nrow( d.cdc )
   }
   
-  # create indices in data for the spatial random effects
-  d.jhu$re.s <- 1:nrow( d.jhu )
-  d.cdc$re.s <- 1:nrow( d.cdc )
   
   # create indices in data for the state random effects
   # d.jhu <- d.jhu %>% group_by( state ) %>% 
@@ -1175,7 +1178,6 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
     
   }
   
-  
   ### call INLA ###
   
   print( "Fit Final model...BEGIN" )
@@ -1186,57 +1188,63 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
     
     if( !is.null( E ) ) d.jhu$E <- d.jhu[[E]] # set E value
     
-    if( is.null( selection.criterion ) ){
+    
+    res.jhu <- NULL # initialize `res.jhu` so that while loop below runs
+    runs <- 0 # initialize no. of runs
+    while( is.null( res.jhu ) ){
+      res.jhu <-  tryCatch( 
+        
+        inla( f.jhu, family = "nbinomial", data = data.frame( d.jhu ),
+              control.predictor = list( compute = TRUE ), E = E, scale = TRUE, # set scale = TRUE so that models with different priors can be compared
+              control.compute = list( return.marginals.predictor = TRUE ), # compute marginals
+              control.fixed = list( mean = 0.0, prec = 0.001 ) ), # set mean (0) and precision (0.001 -- or SD = 1000) priors for fixed effects
+        
+        error = function( e )
+          NULL ) # assign model2 as NULL if `inla` function breaks
       
-      res.jhu <- NULL # initialize `res.jhu` so that while loop below runs
-      runs <- 0 # initialize no. of runs
-      while( is.null( res.jhu ) ){
-        res.jhu <-  tryCatch( 
-          
-          inla( f.jhu, family = "nbinomial", data = data.frame( d.jhu ),
-                control.predictor = list( compute = TRUE ), E = E, scale = TRUE, # set scale = TRUE so that models with different priors can be compared
-                control.compute = list( return.marginals.predictor = TRUE ), # compute marginals
-                control.fixed = list( mean = 0.0, prec = 0.001 ) ), # set mean (0) and precision (0.001 -- or SD = 1000) priors for fixed effects
-          
-          error = function( e )
-            NULL ) # assign model2 as NULL if `inla` function breaks
-        
-        # run tracker
-        runs <- runs + 1
-        
-      }
+      # run tracker
+      runs <- runs + 1
       
     }
     
-    # variable selection (first "dic" and then "waic") --uses `stepwise_z` function written above`
-    if( !is.null ( selection.criterion ) ){
-      
-      steps.jhu <-  forwards_z(
-        formula.full = f.jhu,
-        data = d.jhu,
-        main.x = c( "I(fi.perc.20/4)", "health.index", "median.age", "sir.jhu",
-                    "perc.vaccinated.state", "health.index.state", 
-                    "elec.2020.margin.state", "sir.jhu.state" ),
-        criterion.threshold = criterion.threshold, 
-        criterion = selection.criterion,
-        car.prior = car.prior,
-        ur.prior = ur.prior )
-      
-      # extract model from last step
-      this.step <- tail( names( steps.jhu ), 1 )
-      res.jhu <- steps.jhu[[this.step]]$out.model
-      if( length( steps.jhu[[this.step]]$log ) == 0 ) steps.jhu[[this.step]]$log <- "Variable selection concluded without removal of any variables from the full model."
-      
-      # other meta data to return
-      other.meta <- steps.jhu[[this.step]][ c( "log", "add.meta.table" ) ]
-      
-    }
+    
     
     # save proportion of variance explained by random effects
     p.exp <- inla_var_explained( res.jhu )
     
     print( "Fit Final model...DONE" )
     
+    
+    ## model 4: demographic model ##
+    
+    # null model
+    if( !is.null( model.4.formula ) ){
+      
+      print( "Fit Demographic model...BEGIN" )
+      
+      demo.model <- NULL # initialize `demo.model` so that while loop below runs
+      runs <- 0 # initialize no. of runs
+      while( is.null( demo.model ) ){
+        demo.model <-  tryCatch( 
+          
+          inla( model.4.formula, family = "nbinomial", data = data.frame( d.jhu ),
+                control.predictor = list( compute = TRUE ), E = E, scale = TRUE, # set scale = TRUE so that models with different priors can be compared
+                control.fixed = list( mean = 0.0, prec = 0.0001 ) ), # set mean (0) and precision (0.001 -- or SD = 1000) priors for fixed effects
+          
+          error = function( e )
+            NULL ) # assign demo.model as NULL if `inla` function breaks
+        
+        # run tracker
+        runs <- runs + 1
+        
+      }
+      
+      # save proportion of variance explained by random effects
+      p.exp.demo.model <- inla_var_explained( demo.model )
+      
+      print( "Fit Demographic model...DONE" )
+      
+    }
     
     ## null model and model #2 if specified ##
     
@@ -1334,8 +1342,6 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
   if( which.model == "cdc" ){
     
     if( !is.null( E ) ) d.cdc$E <- d.cdc[[E]] # set E value
-    
-    if( is.null( selection.criterion ) ){
       
       res.cdc <- NULL # initialize `res.cdc` so that while loop below runs
       runs <- 0 # initialize no. of runs
@@ -1354,33 +1360,6 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
         runs <- runs + 1
         
       }
-    }
-    
-    
-    
-    # variable selection (first "dic" and then "waic")
-    if( !is.null ( selection.criterion ) ){
-      
-      steps.cdc <-  forwards_z(
-        formula.full = f.cdc,
-        data = d.cdc,
-        main.x = c( "I(fi.perc.20/4)", "health.index", "median.age", "sir.cdc",
-                    "perc.vaccinated.state", "health.index.state", 
-                    "elec.2020.margin.state", "sir.cdc.state" ),
-        criterion.threshold = criterion.threshold, 
-        criterion = selection.criterion,
-        car.prior = car.prior,
-        ur.prior = ur.prior )
-      
-      # extract model from last step
-      this.step <- tail( names( steps.cdc ), 1 )
-      res.cdc <- steps.cdc[[this.step]]$out.model
-      if( length( steps.cdc[[this.step]]$log ) == 0 ) steps.cdc[[this.step]]$log <- "Variable selection concluded without removal of any variables from the full model."
-      
-      # other meta data to return
-      other.meta <- steps.cdc[[this.step]][ c( "log", "add.meta.table" ) ]
-      
-    }
     
     # save proportion of variance explained by random effects
     p.exp <- inla_var_explained( res.cdc )
@@ -1415,6 +1394,38 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
       print( "Fit Null model...DONE" )
       
     }
+    
+    ## model 4: demographic model ##
+    
+    # null model
+    if( !is.null( model.4.formula ) ){
+      
+      print( "Fit Demographic model...BEGIN" )
+      
+      demo.model <- NULL # initialize `demo.model` so that while loop below runs
+      runs <- 0 # initialize no. of runs
+      while( is.null( demo.model ) ){
+        demo.model <-  tryCatch( 
+          
+          inla( model.4.formula, family = "nbinomial", data = data.frame( d.cdc ),
+                control.predictor = list( compute = TRUE ), E = E, scale = TRUE, # set scale = TRUE so that models with different priors can be compared
+                control.fixed = list( mean = 0.0, prec = 0.0001 ) ), # set mean (0) and precision (0.001 -- or SD = 1000) priors for fixed effects
+          
+          error = function( e )
+            NULL ) # assign demo.model as NULL if `inla` function breaks
+        
+        # run tracker
+        runs <- runs + 1
+        
+      }
+      
+      # save proportion of variance explained by random effects
+      p.exp.demo.model <- inla_var_explained( demo.model )
+      
+      print( "Fit Demographic model...DONE" )
+      
+    }
+    
     
     # model 2
     if( !is.null( model.2.formula ) ){
@@ -1496,7 +1507,6 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
   print( "Model-fitting...DONE")
   print( "Map Decomposition...BEGIN" )
   
-  
   ### map decomposition ###
   
   ## parameters to pass to `Map` which will make maps using `plot_rr` for each of the fixed, unstructured random, spatial effects, and psi plot
@@ -1564,36 +1574,36 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
                                                                 pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
                                                                 style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
                                                                 height = unit(1.7, "cm") ) +
-                            theme( axis.text.y = element_blank()), 
+                             theme( axis.text.y = element_blank()), 
                            map.d$spatial.effect$psi.plot +
                              # add north-pointing compass rose
                              ggspatial::annotation_north_arrow( location = "tl", which_north = "true", 
                                                                 pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
                                                                 style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
                                                                 height = unit(1.7, "cm") ) +
-                            theme( axis.text.y = element_blank()),
-                          map.d$overall.risk$main.plot +
-                            # add north-pointing compass rose
-                            ggspatial::annotation_north_arrow( location = "tl", which_north = "true", 
-                                                               pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
-                                                               style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
-                                                               height = unit(1.3, "cm") ) +
-                            annotation_scale( height = unit(0.14, "cm"), style = "bar" ),
-                          map.d$unstructured.random.state$main.plot + 
-                            # add north-pointing compass rose
-                            ggspatial::annotation_north_arrow( location = "tl", which_north = "true", 
-                                                               pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
-                                                               style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
-                                                               height = unit(1.7, "cm") ) +
-                            theme( axis.text.y = element_blank()),
-                          map.d$unstructured.random.cty$main.plot + 
-                            # add north-pointing compass rose
-                            ggspatial::annotation_north_arrow( location = "tl", which_north = "true", 
-                                                               pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
-                                                               style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
-                                                               height = unit(1.7, "cm") ) + 
-                            theme( axis.text.y = element_blank()), 
-                          ncol = 3, nrow =2, common.legend = TRUE, legend = "bottom") +
+                             theme( axis.text.y = element_blank()),
+                           map.d$overall.risk$main.plot +
+                             # add north-pointing compass rose
+                             ggspatial::annotation_north_arrow( location = "tl", which_north = "true", 
+                                                                pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
+                                                                style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
+                                                                height = unit(1.3, "cm") ) +
+                             annotation_scale( height = unit(0.14, "cm"), style = "bar" ),
+                           map.d$unstructured.random.state$main.plot + 
+                             # add north-pointing compass rose
+                             ggspatial::annotation_north_arrow( location = "tl", which_north = "true", 
+                                                                pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
+                                                                style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
+                                                                height = unit(1.7, "cm") ) +
+                             theme( axis.text.y = element_blank()),
+                           map.d$unstructured.random.cty$main.plot + 
+                             # add north-pointing compass rose
+                             ggspatial::annotation_north_arrow( location = "tl", which_north = "true", 
+                                                                pad_x = unit(0.2, "cm"), pad_y = unit(0.2, "cm"),
+                                                                style = north_arrow_fancy_orienteering, width = unit(1.3, "cm"), 
+                                                                height = unit(1.7, "cm") ) + 
+                             theme( axis.text.y = element_blank()), 
+                           ncol = 3, nrow =2, common.legend = TRUE, legend = "bottom") +
     cowplot::draw_figure_label( label = if( which.model == "jhu" ) "Data Source: Johns Hopkins" else if ( which.model == "cdc" ) "Data Source: CDC", 
                                 position = "bottom.left",
                                 family = "Avenir", color = "grey44",
@@ -1652,10 +1662,11 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
   
   # bind results `inla_explained_var` fct
   df.exp.var <- bind_rows( p.exp.null.model, p.exp.model.2, p.exp.model.3,
-                           p.exp ) %>%
+                           p.exp.demo.model, p.exp ) %>%
     mutate( model = c( "Null Model",
                        "Basic Model",
                        "Basic + State Model",
+                       "Demographic Model",
                        "Final Model" ) )
   
   df.resid <- cbind( melt( df.exp.var %>%
@@ -1683,9 +1694,10 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
   # generate plot #
   
   
-  if( !is.null( null.model.formula ) & !is.null( model.2.formula ) & !is.null( model.3.formula ) ){
+  if( !is.null( null.model.formula ) & !is.null( model.2.formula ) & !is.null( model.3.formula ) &
+      !is.null( model.4.formula ) ){
     
-    summed.df <- df.resid[ 1:4, "variance" ] + df.resid[ 5:8, "variance" ] + df.resid[ 9:12, "variance" ]
+    summed.df <- df.resid[ 1:5, "variance" ] + df.resid[ 6:10, "variance" ] + df.resid[ 11:15, "variance" ]
     
     max.limit <- max( summed.df )
     
@@ -1719,7 +1731,7 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
              axis.text.x = element_text( angle = -30, hjust = 0.1, vjust = 0.5,
                                          size = 14),
              axis.text.y = element_text( size = 13 ) ) +
-      scale_x_discrete( limits = c("Null Model","Basic Model", "Basic + State Model","Final Model" ) ) + # specify order
+      scale_x_discrete( limits = c("Null Model","Basic Model", "Basic + State Model", "Demographic Model", "Final Model" ) ) + # specify order
       scale_y_continuous( labels = these.limits.character, # ensure labels on y-axis go to 2 digits
                           breaks = these.limits )+
       ylab( "Residual Variance" ) +
@@ -1730,40 +1742,26 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
   
   print( "Other Plots...END" )
   
+  
   total.time.end <- Sys.time()
   
   print( total.time.end - total.time.start )
   
-  # returns conditional on if stepwise selection is indicated
-  if ( is.null( selection.criterion ) ) return( list( model.fit = this.model, 
-                                                      model.summary = summary( this.model ),
-                                                      runs.required = runs,
-                                                      map.decomp = map.decomp,
-                                                      psi.plot = map.d$fixed.effect$psi.plot +
-                                                        guides( fill = guide_colorbar( ticks.colour = NA,
-                                                                                       frame.colour =  "black",
-                                                                                       barwidth = 0.6,
-                                                                                       barheight = 9 ) ),
-                                                      fixed.term = fixed.return,
-                                                      nnbs.var.plot = sp.var.nnbs.plot,
-                                                      explained.geo.var = df.exp.var,
-                                                      rand.eff.var.plot = if( !is.null( null.model.formula ) & !is.null( model.2.formula ) ) explained.var.plot else NULL,
-                                                      total.time.elapsed = total.time.end - total.time.start ) )
+  return( list( model.fit = this.model, 
+                model.summary = summary( this.model ),
+                runs.required = runs,
+                map.decomp = map.decomp,
+                psi.plot = map.d$fixed.effect$psi.plot +
+                  guides( fill = guide_colorbar( ticks.colour = NA,
+                                                 frame.colour =  "black",
+                                                 barwidth = 0.6,
+                                                 barheight = 9 ) ),
+                fixed.term = fixed.return,
+                nnbs.var.plot = sp.var.nnbs.plot,
+                explained.geo.var = df.exp.var,
+                rand.eff.var.plot = if( !is.null( null.model.formula ) & !is.null( model.2.formula ) ) explained.var.plot else NULL,
+                total.time.elapsed = total.time.end - total.time.start ) )
   
-  if ( !is.null( selection.criterion ) ) return( list( model.fit = this.model, 
-                                                       model.summary = summary( this.model ),
-                                                       selection.meta.data = other.meta,
-                                                       map.decomp = map.decomp,
-                                                       psi.plot = map.d$fixed.effect$psi.plot +
-                                                         guides( fill = guide_colorbar( ticks.colour = NA,
-                                                                                        frame.colour =  "black",
-                                                                                        barwidth = 0.6,
-                                                                                        barheight = 9 ) ),
-                                                       fixed.term = fixed.return,
-                                                       nnbs.var.plot = sp.var.nnbs.plot,
-                                                       explained.geo.var = df.exp.var,
-                                                       rand.eff.var.plot = if( !is.null( null.model.formula ) & !is.null( model.2.formula ) ) explained.var.plot else NULL,
-                                                       total.time.elapsed = total.time.end - total.time.start ) )
 }
 
 # recommended sizing for map decomposition plot
@@ -1791,7 +1789,7 @@ car_inla_analysis <- function( d.jhu, d.cdc , which.model, car.prior = NULL,
 
 
 inla_results_save <- function( car.inla.object, path, tag, map.decomp.width = 4124,
-                               map.decomp.height = 2808 ){
+                               map.decomp.height = 2808, dpi = 600 ){
   # car.inla.object - the object that results when running car_inla_analysis
   # path = a string with the path to the destination folder
   # tag = a string that will be appended to the file names (e.g., "-main-model")
@@ -1803,8 +1801,8 @@ inla_results_save <- function( car.inla.object, path, tag, map.decomp.width = 41
   print("BEGIN...save map decomposition" )
   
   # save it with dimensions fixed
-  ggsave( paste0( path, "map-decomposition-", tag, ".tiff" ),
-          width = 22, height = 12 , 
+  ggsave( paste0( path, "map-decomposition-", tag, ".png" ),
+          width = 22, height = 12 , dpi = dpi,
           plot = car.inla.object$map.decomp )
   
   print("DONE...save map decomposition" )
@@ -1821,7 +1819,7 @@ inla_results_save <- function( car.inla.object, path, tag, map.decomp.width = 41
   ## psi plot ##
   print("BEGIN...save psi plot" )
   
-  ggsave( paste0( path, "psi-plot-", tag, ".tiff" ),
+  ggsave( paste0( path, "psi-plot-", tag, ".png" ), dpi = dpi,
           units = "px", width = (4124), height = (2808) , plot = car.inla.object$psi.plot )
   
   print("DONE...save psi plot" )
@@ -1832,7 +1830,7 @@ inla_results_save <- function( car.inla.object, path, tag, map.decomp.width = 41
   
   suppressWarnings( {
     # save it with dimensions fixed ##
-    ggsave( paste0( path, "nbs-var-plot-", tag, ".tiff" ),
+    ggsave( paste0( path, "nbs-var-plot-", tag, ".png" ), dpi = dpi,
             width = 7, height = 6, plot = car.inla.object$nnbs.var.plot )
   }
   
@@ -1846,7 +1844,7 @@ inla_results_save <- function( car.inla.object, path, tag, map.decomp.width = 41
   # save it with dimensions fixed ##
   if( !is.null( car.inla.object$rand.eff.var.plot ) ){
     
-    ggsave( paste0( path, "prop-var-plot-", tag, ".tiff" ),
+    ggsave( paste0( path, "prop-var-plot-", tag, ".png" ), dpi = dpi,
             width = 8*0.8, height = 12*0.8, plot = car.inla.object$rand.eff.var.plot )
     
   }
@@ -1911,7 +1909,8 @@ model_terms <- function( formula ){
   char.f <- as.character( formula )[3] %>%
     str_replace_all( ., '\\"', "'") %>%
     str_split( ., "\\s\\+\\s" ) %>%
-    unlist()
+    unlist() %>%
+    str_remove_all( ., "\\s" ) # removes all white space to keep discrepancies from being flagged that are not actual discrepancies
   
   # offset terms to always be included
   offs <- char.f[ which( str_detect( char.f, "offset" ) ) ]

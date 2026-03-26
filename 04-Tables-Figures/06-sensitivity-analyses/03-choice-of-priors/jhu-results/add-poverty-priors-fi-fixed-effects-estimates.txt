@@ -1,0 +1,5 @@
+"prior.choice","variable","exp.estimate.95.ci"
+"1","log-gamma(1, 0.005)","I(fi.perc.20/4)","1.08 (1 - 1.18)"
+"2","log-gamma(0.5, 0.01)","I(fi.perc.20/4)","1.08 (1 - 1.18)"
+"3","log-gamma(0.25, 1)","I(fi.perc.20/4)","1.08 (1 - 1.18)"
+"4","log-gamma(0.5, 1)","I(fi.perc.20/4)","1.08 (1 - 1.18)"

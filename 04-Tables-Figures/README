@@ -1,0 +1,22 @@
+README - Tables and Figures Folder
+
+subfolders in this subdirectory ( "04-Tables-Figures/" ):
+
+"01-main-analysis" -- the "national" analysis, i.e, results of the models fit
+on JHU and CDC data for all counties in all states included in the analysis.
+Results files come from the R script in "R/04-primary-analysis-inla.R"
+
+"02-northeast-analysis" - "05-west-analysis"-- 
+results files for the models on JHU and CDC data but stratifed on Census region.
+Results files come from the R script in "R/04-primary-analysis-inla.R"
+
+"06-sensitivity-analyses" -- results files from the sensitivity analyses (there is
+another README file inside this folder describing its contents). 
+Results files come from the R scripts in "R/sensitivity-analyses"
+
+"07-combination-plots" -- .pptx, .pdf, ad image files for large plots/graphs
+that were combined using powerpoint given that they were too large to arrange 
+with `ggarrange`.
+
+"08-other-supplementary-files" -- sample flow diagram and Moran's I plots.
+Results files come from the R script in "R/03-descriptives.R"

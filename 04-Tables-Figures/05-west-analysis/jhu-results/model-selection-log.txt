@@ -1,0 +1,4 @@
+"x"
+" add step = 1","ADD PREDICTOR: perc.female"
+" add step = 2","ADD PREDICTOR: perc.nh.white"
+" add step = 3","ADD PREDICTOR: perc.native"

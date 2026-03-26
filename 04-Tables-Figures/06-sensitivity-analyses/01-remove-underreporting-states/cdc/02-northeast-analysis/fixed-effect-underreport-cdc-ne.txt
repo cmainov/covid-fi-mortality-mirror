@@ -1,0 +1,2 @@
+"variable","exp.estimate.95.ci"
+"1","I(fi.perc.20/4)","0.91 (0.76 - 1.1)"

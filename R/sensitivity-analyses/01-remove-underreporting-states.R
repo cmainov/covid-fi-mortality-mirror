@@ -5,12 +5,13 @@
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
 # 
 # In this script, we fit the conditional autoregressive models in INLA (with the same specification as in
-# "R/04-primary-analysis-inla.R") but we remove underreporting states. To identify underreporting states,
+# "R/04-primary-analysis-inla.R") but we remove outlier states. To identify underreporting states,
 # we implement an algorithm whereby the states with COVID-19 mortality rates (based on CDC data) that are
 # more than 2x smaller than the COVID-19 mortality rates based on the JHU data are identified and removed 
 #
 # In addition, we also remove Utah, Nebraska, and Florida counties from the analysis 
-# using JHU data as they appeared suspicious in the chloropleths (see R/03-descriptives).
+# using JHU data as they appeared suspicious in the chloropleths and state-level residuals
+# (see R/03-descriptives) and R/04-primary-analysis-inla).
 # 
 #
 # INPUT DATA FILE: "03-Data-Rodeo/01-analytic-data.rds"
@@ -32,6 +33,7 @@ library( viridis ) # color palletes for ggplot
 library( reshape2 ) # for melting data (needed in `car_inla_analysis` fct)
 library( scales ) # for number formatting in ggplot (i.e., numbers past the decimal mark)
 library( cowplot ) # for figure labels
+library( ggspatial )
 
 # helper functions
 source( "R/utils.R" )
@@ -72,75 +74,18 @@ d.poly <- t %>%
 
 
 
-### (2.0) Formula Specification ###
+### (2.0) Formula Specifications ###
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## (2.1) Models with Full Set of Covariates ##
 
-# jhu data
-f.jhu <- deaths.jhu.adj ~ I(fi.perc.20/4) + pct.emp.trans + no.vehic + 
-  disability + no.health.insur + perc.female + 
-  perc.nh.white + perc.native + pop.density + ed.1less.than.hspct + 
-  ed.5college.plus.pct + pct.emp.trade + median.age + perc.asian +
-  perc.vaccinated + gini.index + avg.hhsize + elec.2020.margin +
-  ratio.pop.edp + health.index + sir.jhu + urb.cat.code + 
-  sir.jhu.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid") + f( fips, model = "iid" )
-
-# cdc data
-f.cdc <- deaths.cdc ~ I(fi.perc.20/4) + pct.emp.trans + no.vehic + 
-  disability + no.health.insur + perc.female + 
-  perc.nh.white + perc.native + pop.density + ed.1less.than.hspct + 
-  ed.5college.plus.pct + pct.emp.trade + median.age + perc.asian +
-  perc.vaccinated + gini.index + avg.hhsize + elec.2020.margin +
-  ratio.pop.edp + health.index + sir.cdc + urb.cat.code + 
-  sir.cdc.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g.cdc, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-## ---o--- ##
-
-
-## (2.2) Models with Random Effects and Offset Terms Only ("Null/baseline Model") ##
-
-# jhu
-f.jhu.model.null <- deaths.jhu.adj ~ f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-#cdc
-f.cdc.model.null <- deaths.cdc ~ f( re.s, model = "besag", graph = g.cdc, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-## ---o--- ##
-
-
-## (2.3) Models with Random Effects, Offset Terms, and Fixed Effects for Health Index and Median Age ("Basic Model") ##
-f.jhu.model.2 <- deaths.jhu.adj ~ health.index + median.age + sir.jhu + f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-f.cdc.model.2 <- deaths.cdc ~ health.index + median.age + sir.cdc + f( re.s, model = "besag", graph = g.cdc, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-
-## (2.4) Models with Random Effects, Offset Terms, and Fixed Effects for Health Index and Median Age
-## and State-Level Variables ("Basic + State Model") ##
-
-f.jhu.model.3 <- deaths.jhu.adj ~ health.index + median.age + sir.jhu +
-  sir.jhu.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
-
-f.cdc.model.3 <- deaths.cdc ~ health.index + median.age + sir.cdc +
-  sir.cdc.state + health.index.state + elec.2020.margin.state + perc.vaccinated.state +
-  f( re.s, model = "besag", graph = g.cdc, scale.model = T ) +
-  f( state, model = "iid" ) + f( fips, model = "iid" )
+# model specs
+source( "R/model-specs.R" )
 
 ## ---o--- ##
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
-
 
 
 ### (3.0) Remove States That Appear to be Underreporting (CDC data)###
@@ -228,30 +173,30 @@ states.fips.out <- unique( c( d[ which( d$state %in% states.out), "state.code" ]
 
 ## (4.1) Call INLA ##
 
-res.cdc.1.sens <- car_inla_analysis( d.jhu = d.poly, d.cdc = d.poly.cdc,
-                                     formula.jhu = f.jhu, formula.cdc = f.cdc,
-                                     which.model = "cdc", null.model.formula = f.cdc.model.null,
+res.cdc.1.sens <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.cdc,
+                                     formula.cdc = f.cdc.model.5,
+                                     which.model = "cdc", E = "E_d.c",
+                                     term = "fi", null.model.formula = f.cdc.model.null,
                                      model.2.formula = f.cdc.model.2, 
-                                     model.3.formula = f.cdc.model.3, 
-                                     term = "fi", E = "E_d.c", state.codes.omit = states.fips.out,
-                                     selection.criterion = "waic",
-                                     criterion.threshold = 5,
+                                     model.3.formula = f.cdc.model.3,
+                                     model.4.formula = f.cdc.model.4,
+                                     state.codes.omit = states.fips.out,
                                      na.text = "Incomplete or Omitted Data",
                                      x.legend.pos = 0.78 )
 
-## ---o--- ##
+ ## ---o--- ##
 
 
 ## (4.2) Save Results ##
 
 # dir.create( "04-Tables-Figures/06-sensitivity-analyses" )
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/cdc-remove-underreporting-states" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/cdc-remove-underreporting-states" )
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/01-main-analysis" )
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/01-main-analysis/jhu-results" )
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/01-main-analysis/cdc-results" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/01-main-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/01-main-analysis/jhu-results" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/01-main-analysis/cdc-results" )
 
-inla_results_save( res.cdc.1.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/01-main-analysis/" ),
+inla_results_save( res.cdc.1.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/01-main-analysis/" ),
                    tag = "underreport-cdc-main" )
 
 ## ---o--- ##
@@ -298,14 +243,13 @@ states.out.ne <- unlist( c( unique( d[ d$state %notin%  c( "ME", "NH", "VT", "MA
 ## (5.2) Call INLA ##
 
 # cdc
-res.cdc.ne.sens <- car_inla_analysis( d.jhu = d.poly.cdc.ne, d.cdc = d.poly.cdc.ne,
-                                      formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                      term = "fi", which.model = "cdc", E = "E_d.c", 
-                                      null.model.formula = f.cdc.model.null,
+res.cdc.ne.sens <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.cdc.ne,
+                                      formula.cdc = f.cdc.model.5,
+                                      which.model = "cdc", E = "E_d.c",
+                                      term = "fi", null.model.formula = f.cdc.model.null,
                                       model.2.formula = f.cdc.model.2, 
                                       model.3.formula = f.cdc.model.3,
-                                      selection.criterion = "waic",
-                                      criterion.threshold = 5,
+                                      model.4.formula = f.cdc.model.4,
                                       state.codes.omit = states.out.ne,
                                       na.text = "Incomplete or Omitted Data",
                                       x.legend.pos = 0.78 )
@@ -315,9 +259,9 @@ res.cdc.ne.sens <- car_inla_analysis( d.jhu = d.poly.cdc.ne, d.cdc = d.poly.cdc.
 
 ## (5.3) Save Results ##
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/02-northeast-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/02-northeast-analysis" )
 
-inla_results_save( res.cdc.ne.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/02-northeast-analysis/" ),
+inla_results_save( res.cdc.ne.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/02-northeast-analysis/" ),
                    tag = "underreport-cdc-ne", map.decomp.height = 2060  )
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -365,14 +309,13 @@ states.out.so <- unlist( c( unique( d[ d$state %notin%  c( "MD", "DE", "DC", "WV
 ## (6.2) Call INLA ##
 
 # cdc
-res.cdc.so.sens <- car_inla_analysis( d.jhu = d.poly.cdc.so, d.cdc = d.poly.cdc.so,
-                                      formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                      term = "fi", which.model = "cdc", E = "E_d.c", 
-                                      null.model.formula = f.cdc.model.null,
+res.cdc.so.sens <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.cdc.so,
+                                      formula.cdc = f.cdc.model.5,
+                                      which.model = "cdc", E = "E_d.c",
+                                      term = "fi", null.model.formula = f.cdc.model.null,
                                       model.2.formula = f.cdc.model.2, 
                                       model.3.formula = f.cdc.model.3,
-                                      selection.criterion = "waic",
-                                      criterion.threshold = 5,
+                                      model.4.formula = f.cdc.model.4,
                                       state.codes.omit = states.out.so,
                                       na.text = "Incomplete or Omitted Data",
                                       x.legend.pos = 0.78 )
@@ -382,9 +325,9 @@ res.cdc.so.sens <- car_inla_analysis( d.jhu = d.poly.cdc.so, d.cdc = d.poly.cdc.
 
 ## (6.3) Save Results ##
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/03-south-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/03-south-analysis" )
 
-inla_results_save( res.cdc.so.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/03-south-analysis/" ),
+inla_results_save( res.cdc.so.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/03-south-analysis/" ),
                    tag = "underreport-cdc-so", map.decomp.height = 2060  )
 
 ## ---o--- ##
@@ -431,14 +374,13 @@ states.out.mw <- unlist( c( unique( d[ d$state %notin%  c( "OH", "IN", "MI", "IL
 ## (7.2) Call INLA ##
 
 # cdc
-res.cdc.mw.sens <- car_inla_analysis( d.jhu = d.poly.cdc.mw, d.cdc = d.poly.cdc.mw,
-                                      formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                      term = "fi", which.model = "cdc", E = "E_d.c", 
-                                      null.model.formula = f.cdc.model.null,
+res.cdc.mw.sens <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.cdc.mw,
+                                      formula.cdc = f.cdc.model.5,
+                                      which.model = "cdc", E = "E_d.c",
+                                      term = "fi", null.model.formula = f.cdc.model.null,
                                       model.2.formula = f.cdc.model.2, 
                                       model.3.formula = f.cdc.model.3,
-                                      selection.criterion = "waic",
-                                      criterion.threshold = 5,
+                                      model.4.formula = f.cdc.model.4,
                                       state.codes.omit = states.out.mw,
                                       na.text = "Incomplete or Omitted Data",
                                       x.legend.pos = 0.78 )
@@ -448,9 +390,9 @@ res.cdc.mw.sens <- car_inla_analysis( d.jhu = d.poly.cdc.mw, d.cdc = d.poly.cdc.
 
 ## (7.3) Save Results ##
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/04-midwest-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/04-midwest-analysis" )
 
-inla_results_save( res.cdc.mw.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/04-midwest-analysis/" ),
+inla_results_save( res.cdc.mw.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/04-midwest-analysis/" ),
                    tag = "underreport-cdc-mw", map.decomp.height = 2060  )
 
 ## ---o--- ##
@@ -498,23 +440,22 @@ states.out.w <- unlist( c( unique( d[ d$state %notin%  c( "NM", "CO", "WY", "MT"
 ## (8.2) Call INLA ##
 
 # cdc
-res.cdc.w.sens <- car_inla_analysis( d.jhu = d.poly.cdc.w, d.cdc = d.poly.cdc.w,
-                                     formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                     term = "fi", which.model = "cdc", E = "E_d.c", 
-                                     null.model.formula = f.cdc.model.null,
+res.cdc.w.sens <- car_inla_analysis( d.jhu = NULL, d.cdc = d.poly.cdc.w,
+                                     formula.cdc = f.cdc.model.5,
+                                     which.model = "cdc", E = "E_d.c",
+                                     term = "fi", null.model.formula = f.cdc.model.null,
                                      model.2.formula = f.cdc.model.2, 
                                      model.3.formula = f.cdc.model.3,
-                                     selection.criterion = "waic",
-                                     criterion.threshold = 5,
+                                     model.4.formula = f.cdc.model.4,
                                      state.codes.omit = states.out.w,
                                      na.text = "Incomplete or Omitted Data",
                                      x.legend.pos = 0.78 )
 
 ## (8.3) Save Results ##
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/05-west-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/05-west-analysis" )
 
-inla_results_save( res.cdc.w.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/05-west-analysis/" ),
+inla_results_save( res.cdc.w.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/05-west-analysis/" ),
                    tag = "underreport-cdc-w", map.decomp.height = 2060  )
 
 
@@ -553,7 +494,7 @@ region.char <- c("Census Region: Northeast", "Census Region: South",
 
 
 # save to incorporate into a combination plot with the map decomposition of the JHU main model
-ggsave( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-cdc/underreport-cdc-forest-plot-both-all-analyses.png",
+ggsave( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/cdc/underreport-cdc-forest-plot-both-all-analyses.png",
         width = 6.5, height = 8.5)
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -590,14 +531,13 @@ d.poly.no.ne.fl.ut <- d.poly.no.ne.fl.ut %>%
 
 ## (9.1) Call INLA ##
 
-res.jhu.1.sens <- car_inla_analysis( d.jhu = d.poly.no.ne.fl.ut, d.cdc = d.poly.no.ne.fl.ut,
-                                     formula.jhu = f.jhu, formula.cdc = f.cdc,
+res.jhu.1.sens <- car_inla_analysis( d.jhu = d.poly.no.ne.fl.ut, d.cdc = NULL,
+                                     formula.jhu = f.jhu.model.5, E = "E_d.j",
                                      which.model = "jhu", null.model.formula = f.jhu.model.null,
                                      model.2.formula = f.jhu.model.2, 
                                      model.3.formula = f.jhu.model.3, 
-                                     term = "fi", E = "E_d.j", selection = "waic",
-                                     criterion.threshold = 5,
-                                     state.codes.omit = states.fips.out.jhu,
+                                     model.4.formula = f.jhu.model.4, 
+                                     term = "fi", state.codes.omit = states.fips.out.jhu,
                                      na.text = "Incomplete or Omitted Data",
                                      x.legend.pos = 0.78 )
 
@@ -607,9 +547,9 @@ res.jhu.1.sens <- car_inla_analysis( d.jhu = d.poly.no.ne.fl.ut, d.cdc = d.poly.
 ## (9.2) Save Results ##
 
 # dir.create( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu" )
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/01-main-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/01-main-analysis" )
 
-inla_results_save( res.jhu.1.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/01-main-analysis/" ),
+inla_results_save( res.jhu.1.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/01-main-analysis/" ),
                    tag = "no-ne-fl-ut-jhu-main" )
 
 ## ---o--- ##
@@ -656,14 +596,13 @@ states.out.ne <- unlist( c( unique( d[ d$state %notin%  c( "ME", "NH", "VT", "MA
 ## (10.2) Call INLA ##
 
 # jhu
-res.jhu.ne.sens <- car_inla_analysis( d.jhu = d.poly.jhu.ne, d.cdc = d.poly.jhu.ne,
-                                      formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                      term = "fi", which.model = "jhu", E = "E_d.c", 
-                                      null.model.formula = f.jhu.model.null,
+res.jhu.ne.sens <- car_inla_analysis( d.jhu = d.poly.jhu.ne, d.cdc = NULL,
+                                      formula.jhu = f.jhu.model.5, E = "E_d.j",
+                                      which.model = "jhu", null.model.formula = f.jhu.model.null,
                                       model.2.formula = f.jhu.model.2, 
-                                      model.3.formula = f.jhu.model.3,
-                                      selection.criterion = "waic",
-                                      criterion.threshold = 5,
+                                      model.3.formula = f.jhu.model.3, 
+                                      model.4.formula = f.jhu.model.4, 
+                                      term = "fi",
                                       state.codes.omit = states.out.ne,
                                       na.text = "Incomplete or Omitted Data",
                                       x.legend.pos = 0.78 )
@@ -672,10 +611,10 @@ res.jhu.ne.sens <- car_inla_analysis( d.jhu = d.poly.jhu.ne, d.cdc = d.poly.jhu.
 
 
 ## (10.3) Save Results ##
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/")
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/02-northeast-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/")
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/02-northeast-analysis" )
 
-inla_results_save( res.jhu.ne.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/02-northeast-analysis/" ),
+inla_results_save( res.jhu.ne.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/02-northeast-analysis/" ),
                    tag = "underreport-jhu-ne", map.decomp.height = 2060  )
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -723,14 +662,13 @@ states.out.so <- unlist( c( unique( d[ d$state %notin%  c( "MD", "DE", "DC", "WV
 ## (11.2) Call INLA ##
 
 # jhu
-res.jhu.so.sens <- car_inla_analysis( d.jhu = d.poly.jhu.so, d.cdc = d.poly.jhu.so,
-                                      formula.jhu = f.jhu, formula.cdc = f.cdc, 
-                                      term = "fi", which.model = "jhu", E = "E_d.c", 
-                                      null.model.formula = f.jhu.model.null,
+res.jhu.so.sens <- car_inla_analysis( d.jhu = d.poly.jhu.so, d.cdc = NULL,
+                                      formula.jhu = f.jhu.model.5, E = "E_d.j",
+                                      which.model = "jhu", null.model.formula = f.jhu.model.null,
                                       model.2.formula = f.jhu.model.2, 
-                                      model.3.formula = f.jhu.model.3,
-                                      selection.criterion = "waic",
-                                      criterion.threshold = 5,
+                                      model.3.formula = f.jhu.model.3, 
+                                      model.4.formula = f.jhu.model.4, 
+                                      term = "fi",
                                       state.codes.omit = states.out.so,
                                       na.text = "Incomplete or Omitted Data",
                                       x.legend.pos = 0.78 )
@@ -740,9 +678,9 @@ res.jhu.so.sens <- car_inla_analysis( d.jhu = d.poly.jhu.so, d.cdc = d.poly.jhu.
 
 ## (11.3) Save Results ##
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/03-south-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/03-south-analysis" )
 
-inla_results_save( res.jhu.so.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/03-south-analysis/" ),
+inla_results_save( res.jhu.so.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/03-south-analysis/" ),
                    tag = "underreport-jhu-so", map.decomp.height = 2060  )
 
 ## ---o--- ##
@@ -790,13 +728,12 @@ states.out.mw <- unlist( c( unique( d[ d$state %notin%  c( "OH", "IN", "MI", "IL
 
 # jhu
 res.jhu.mw.sens <- car_inla_analysis( d.jhu = d.poly.jhu.mw, d.cdc = d.poly.jhu.mw,
-                                      formula.jhu = f.jhu, formula.cdc = f.jhu, 
-                                      term = "fi", which.model = "jhu", E = "E_d.c", 
-                                      null.model.formula = f.jhu.model.null,
+                                      formula.jhu = f.jhu.model.5, E = "E_d.j",
+                                      which.model = "jhu", null.model.formula = f.jhu.model.null,
                                       model.2.formula = f.jhu.model.2, 
-                                      model.3.formula = f.jhu.model.3,
-                                      selection.criterion = "waic",
-                                      criterion.threshold = 5,
+                                      model.3.formula = f.jhu.model.3, 
+                                      model.4.formula = f.jhu.model.4, 
+                                      term = "fi",
                                       state.codes.omit = states.out.mw,
                                       na.text = "Incomplete or Omitted Data",
                                       x.legend.pos = 0.78 )
@@ -806,9 +743,9 @@ res.jhu.mw.sens <- car_inla_analysis( d.jhu = d.poly.jhu.mw, d.cdc = d.poly.jhu.
 
 ## (12.3) Save Results ##
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/04-midwest-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/04-midwest-analysis" )
 
-inla_results_save( res.jhu.mw.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/04-midwest-analysis/" ),
+inla_results_save( res.jhu.mw.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/04-midwest-analysis/" ),
                    tag = "underreport-jhu-mw", map.decomp.height = 2060  )
 
 ## ---o--- ##
@@ -857,22 +794,21 @@ states.out.w <- unlist( c( unique( d[ d$state %notin%  c( "NM", "CO", "WY", "MT"
 
 # jhu
 res.jhu.w.sens <- car_inla_analysis( d.jhu = d.poly.jhu.w, d.cdc = d.poly.jhu.w,
-                                     formula.jhu = f.jhu, formula.cdc = f.jhu, 
-                                     term = "fi", which.model = "jhu", E = "E_d.c", 
-                                     null.model.formula = f.jhu.model.null,
+                                     formula.jhu = f.jhu.model.5, E = "E_d.j",
+                                     which.model = "jhu", null.model.formula = f.jhu.model.null,
                                      model.2.formula = f.jhu.model.2, 
-                                     model.3.formula = f.jhu.model.3,
-                                     selection.criterion = "waic",
-                                     criterion.threshold = 5,
+                                     model.3.formula = f.jhu.model.3, 
+                                     model.4.formula = f.jhu.model.4, 
+                                     term = "fi",
                                      state.codes.omit = states.out.w,
                                      na.text = "Incomplete or Omitted Data",
                                      x.legend.pos = 0.78 )
 
 ## (13.3) Save Results ##
 
-# dir.create( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/05-west-analysis" )
+# dir.create( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/05-west-analysis" )
 
-inla_results_save( res.jhu.w.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/05-west-analysis/" ),
+inla_results_save( res.jhu.w.sens, path = paste0( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/05-west-analysis/" ),
                    tag = "underreport-jhu-w", map.decomp.height = 2060  )
 
 
@@ -910,6 +846,6 @@ region.char <- c("Census Region: Northeast", "Census Region: South",
 
 
 # save to incorporate into a combination plot with the map decomposition of the JHU main model
-ggsave( "04-Tables-Figures/06-sensitivity-analyses/02-remove-underreporting-jhu/underreport-jhu-forest-plot-both-all-analyses.png",
+ggsave( "04-Tables-Figures/06-sensitivity-analyses/01-remove-underreporting-states/jhu/underreport-jhu-forest-plot-both-all-analyses.png",
         width = 6.5, height = 8.5)
 # ---------------------------------------------------------------------------------------------------------------------------------------------------------

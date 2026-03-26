@@ -1,0 +1,13 @@
+README - Sensitivity Analyses Tables and Figures Subfolder
+
+subfolders in this subdirectory ( "04-Tables-Figures/sensitivity-analyses" ):
+
+"01-remove-underreporting-states" -- results from of CDC data analyses removing underreporting states (i.e., those that have more 2x lower mean state level mortality rate compared to JHU data. Results files for the models on JHU adata removing counties in Utah, Nebraska, and Florida.
+
+Results files come from the R script in "R/sensitivity-analyses/01-remove-underreporting-states.R".
+
+"02-add-addtl-vars.R" -- results from sensitivity analyses where we add county-level poverty rate, % Black, % Hispanic, and the unemployment rate
+#  as covariates in the model that were not included in the primary analysis.
+
+"03-choice-of-priors" -- results after changing the priors for the random effects. Only done for the JHU "national" data. Results files come from the R script in "R/sensitivity-analyses/03-choice-of-priors.R".
+
