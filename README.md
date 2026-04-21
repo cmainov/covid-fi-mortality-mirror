@@ -13,5 +13,3 @@ Public repository of R code and data for reproducing the analysis in the compani
 **/04-Tables-Figures**: Contains figures and tables generated throughout the analysis.
 
 **/R**: Contains all `.R` files with code to reproduce all data-wrangling steps, analyses, tables, and figures.
-\
-\
